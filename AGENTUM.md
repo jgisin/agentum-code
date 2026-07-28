@@ -15,6 +15,19 @@ the smallest possible rebrand diff.
 - `packages/opencode/src/cli/upgrade.ts` — self-update defaults OFF
   (the binary ships inside Agentum.app and is updated by the app's
   release cycle). Explicit `autoupdate: true` config still works.
+- `packages/opencode/src/session/instruction.ts` — project rules prefer
+  `CLAUDE.md` over `AGENTS.md` (upstream order reversed). Agentum's
+  handoff injects a lean ~5KB CLAUDE.md brief AND the 100KB AGENTS.md
+  reference; first-match-wins upstream ingested the 100KB one into every
+  session. Verified live (marker-file test): sessions see the brief.
+- `packages/opencode/src/session/system.ts` +
+  `packages/opencode/src/session/prompt/deepseek.txt` — DeepSeek models
+  get a dedicated system prompt (3.4KB vs default.txt's 8.5KB), tuned
+  for V4-flash with the terse-output rules intact. Deliberately NOT
+  trimmed: the tool description .txt files — permission-denied tools are
+  already excluded from requests (`Permission.visibleTools`), and the
+  remaining descriptions are prefix-cache-friendly, so rewriting them is
+  rebase burden for little gain.
 - `AGENTUM.md` (this file).
 
 Known cosmetic leftover: the TUI default-command help line still says

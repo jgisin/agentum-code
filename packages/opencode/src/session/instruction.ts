@@ -61,9 +61,16 @@ const layer: Layer.Layer<
       path.join(global.config, "AGENTS.md"),
       ...(!flags.disableClaudeCodePrompt ? [path.join(global.home, ".claude", "CLAUDE.md")] : []),
     ]
+    // Agentum Code rebrand: CLAUDE.md is preferred over AGENTS.md (upstream
+    // order is reversed). Agentum's authoring handoff injects BOTH into an
+    // agent's dir — a lean per-agent CLAUDE.md brief (~5KB) and the full
+    // 100KB AGENTS.md contract reference. First-match-wins below means the
+    // upstream order silently ingests the 100KB reference into every
+    // session; preferring the brief cuts rules ingestion ~95%, and the
+    // reference stays readable on demand.
     const instructionFiles = [
-      "AGENTS.md",
       ...(!flags.disableClaudeCodePrompt ? ["CLAUDE.md"] : []),
+      "AGENTS.md",
       "CONTEXT.md", // deprecated
     ]
 
