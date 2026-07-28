@@ -7,7 +7,12 @@ import { GlobalBus } from "@/bus/global"
 
 export async function upgrade() {
   const config = await AppRuntime.runPromise(Config.Service.use((cfg) => cfg.getGlobal()))
-  if (config.autoupdate === false || Flag.OPENCODE_DISABLE_AUTOUPDATE) return
+  // Agentum Code rebrand: this binary ships inside the Agentum app bundle
+  // and is updated by the app's own release cycle — self-updating from
+  // upstream releases would replace the rebrand (or fail against the
+  // read-only .app). Default flips to OFF; explicit config opt-in still works.
+  if (config.autoupdate === undefined || config.autoupdate === false || Flag.OPENCODE_DISABLE_AUTOUPDATE)
+    return
   const method = await Installation.method()
   const latest = await Installation.latest(method).catch(() => {})
   if (!latest) return

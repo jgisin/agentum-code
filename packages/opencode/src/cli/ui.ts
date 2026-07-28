@@ -2,11 +2,12 @@ import { EOL } from "os"
 import { Schema } from "effect"
 import { logo as glyphs } from "./logo"
 
+// Agentum Code rebrand: "agentum" in plain text beside the "code" glyphs.
 const wordmark = [
-  `⠀                                ▄     `,
-  `█▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█`,
-  `█  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀`,
-  `▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀  ▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀`,
+  `⠀                    ▄     `,
+  `        █▀▀▀ █▀▀█ █▀▀█ █▀▀█`,
+  `agentum █    █  █ █  █ █▀▀▀`,
+  `        ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀`,
 ]
 
 export class CancelledError extends Schema.TaggedErrorClass<CancelledError>()("UICancelledError", {}) {}

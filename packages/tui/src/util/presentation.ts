@@ -1,5 +1,7 @@
+// Agentum Code rebrand: "agentum" in plain text beside the "code" glyphs
+// (kept in step with tui/src/logo.ts and opencode/src/cli/ui.ts).
 const logo = {
-  left: ["                   ", "█▀▀█ █▀▀█ █▀▀█ █▀▀▄", "█__█ █__█ █^^^ █__█", "▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀~~▀"],
+  left: ["       ", "       ", "agentum", "       "],
   right: ["             ▄     ", "█▀▀▀ █▀▀█ █▀▀█ █▀▀█", "█___ █__█ █__█ █^^^", "▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀"],
 }
 
