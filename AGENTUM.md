@@ -28,6 +28,13 @@ the smallest possible rebrand diff.
   already excluded from requests (`Permission.visibleTools`), and the
   remaining descriptions are prefix-cache-friendly, so rewriting them is
   rebase burden for little gain.
+- `packages/opencode/src/session/retry.ts` +
+  `packages/tui/src/routes/session/index.tsx` — the Agentum Worker's
+  budget gate (429 `free_tier_limit`/`free_tier_suspended`, User LLM
+  Quota design) is classified like upstream's own free tier: a
+  structured retry action drives a dialog ("AI budget used up", own
+  don't-show kv keys) while the Worker's `retry-after: 3600` idles the
+  schedule to one attempt an hour instead of a hot retry loop.
 - `AGENTUM.md` (this file).
 
 Known cosmetic leftover: the TUI default-command help line still says

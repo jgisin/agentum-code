@@ -73,6 +73,37 @@ export function retryable(error: Err, provider: string) {
     // 5xx errors are transient server failures and should always be retried,
     // even when the provider SDK doesn't explicitly mark them as retryable.
     if (!error.data.isRetryable && !(status !== undefined && status >= 500)) return undefined
+    // Agentum Worker budget gate (User LLM Quota design): the funded proxy
+    // returns 429 {"error":"free_tier_limit"|"free_tier_suspended","message"}
+    // when the account's total AI budget is spent or admin-paused. Retrying
+    // can't fix it (the budget never resets on its own), but we keep the
+    // upstream free-tier shape — a structured action drives the dialog while
+    // retry-after (the Worker sends 3600s) idles the schedule to one attempt
+    // an hour instead of a hot loop. Without this branch the body matches
+    // neither literal below and the session hammers retries with a bare
+    // one-line error.
+    if (provider === "agentum") {
+      const body = parseJSON(error.data.responseBody)
+      const code = str(body?.error)
+      if (code === "free_tier_limit" || code === "free_tier_suspended") {
+        const suspended = code === "free_tier_suspended"
+        const message =
+          str(body?.message) ||
+          (suspended
+            ? "Your AI budget is paused by an administrator — contact support."
+            : "Your included AI budget is used up — connect your own key in the desktop app's Settings, or contact support to raise it.")
+        return {
+          message,
+          action: {
+            reason: code,
+            provider,
+            title: suspended ? "AI budget paused" : "AI budget used up",
+            message,
+            label: "ok",
+          },
+        }
+      }
+    }
     if (error.data.responseBody?.includes("FreeUsageLimitError")) {
       return {
         message: GO_UPSELL_MESSAGE,

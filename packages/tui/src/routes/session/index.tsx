@@ -90,7 +90,12 @@ const GO_UPSELL_FREE_TIER_DONT_SHOW = "go_upsell_dont_show"
 const GO_UPSELL_ACCOUNT_RATE_LIMIT_LAST_SEEN_AT = "go_upsell_account_rate_limit_last_seen_at"
 const GO_UPSELL_ACCOUNT_RATE_LIMIT_DONT_SHOW = "go_upsell_account_rate_limit_dont_show"
 const GO_UPSELL_WINDOW = 86_400_000 // 24 hrs
-const GO_UPSELL_PROVIDERS = new Set(["opencode", "opencode-go"])
+const GO_UPSELL_PROVIDERS = new Set(["opencode", "opencode-go", "agentum"])
+// Agentum's funded-budget dialog keeps its OWN kv keys: a user who said
+// "don't show again" to OpenCode's Go upsell must still learn their Agentum
+// AI budget ran out — and vice versa.
+const AGENTUM_BUDGET_LAST_SEEN_AT = "agentum_budget_last_seen_at"
+const AGENTUM_BUDGET_DONT_SHOW = "agentum_budget_dont_show"
 
 export const alwaysSeparate = new WeakSet<BoxRenderable>()
 
@@ -99,6 +104,17 @@ type RetryAction = Extract<SessionStatus, { type: "retry" }>["action"]
 function goUpsellKeys(action: RetryAction) {
   if (!action) return
   if (!GO_UPSELL_PROVIDERS.has(action.provider)) return
+  if (action.provider === "agentum") {
+    // Both budget reasons (spent / admin-paused) share one key pair — they
+    // are the same "your funded budget is unavailable" conversation.
+    if (action.reason === "free_tier_limit" || action.reason === "free_tier_suspended") {
+      return {
+        lastSeenAt: AGENTUM_BUDGET_LAST_SEEN_AT,
+        dontShow: AGENTUM_BUDGET_DONT_SHOW,
+      }
+    }
+    return
+  }
   if (action.reason === "free_tier_limit") {
     return {
       lastSeenAt: GO_UPSELL_FREE_TIER_LAST_SEEN_AT,
