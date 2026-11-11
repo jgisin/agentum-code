@@ -1,0 +1,231 @@
+# Agentum Code for Windows.
+#
+# Builds an Agentum Code release (a `v<upstream>-agentum.<n>` tag) for
+# windows-x64, packages it the way the macOS asset is packaged (one zip, one
+# binary at its root), smoke-tests the result on a clean Windows runner and
+# records its sha256. It publishes only in jgisin/agentum-code, only when run
+# by hand from the default branch with `publish: true`, and it never replaces
+# an asset that is already on the release.
+#
+# This file is Agentum's own. Upstream's workflows are left untouched; most of
+# them are guarded to anomalyco/opencode or use runners this repo does not have.
+#
+# The build is upstream's own script, run the way AGENTUM.md documents for the
+# macOS release (`bun run build --single --skip-install`), on a Windows runner.
+# `--single` builds only the runner's own platform, which is why the build runs
+# on Windows rather than cross-compiling from Linux: upstream's script
+# cross-compiles only in its all-twelve-targets mode.
+
+name: agentum-windows
+run-name: "agentum-windows ${{ inputs.tag || 'latest release' }}${{ inputs.publish && ' (publish)' || '' }}"
+
+on:
+  pull_request:
+    branches: [agentum]
+    paths:
+      - .github/workflows/agentum-windows.yml
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build, e.g. v1.18.8-agentum.5 (default: the latest release)"
+        required: false
+        type: string
+      publish:
+        description: "Attach the zip to that release (default branch only; never replaces an existing asset)"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: agentum-windows-${{ github.ref }}-${{ inputs.tag || 'latest' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # The repository whose releases are built and published to. Spelled out so
+  # a fork can run the build and smoke test against the real releases (a fork
+  # has none of its own); only that repository itself ever publishes.
+  RELEASE_REPO: jgisin/agentum-code
+  ASSET: agentum-code-windows-x64.zip
+  BIN: agentum-code.exe
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+      zip_sha256: ${{ steps.package.outputs.zip_sha256 }}
+      bin_sha256: ${{ steps.package.outputs.bin_sha256 }}
+    steps:
+      - name: Resolve the release tag
+        id: tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${INPUT_TAG:-}"
+          if [ -z "$tag" ]; then
+            tag="$(gh release view --repo "$RELEASE_REPO" --json tagName -q .tagName)"
+          fi
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+-agentum\.[0-9]+$'; then
+            echo "::error::'$tag' is not an Agentum Code release tag (v<x.y.z>-agentum.<n>)"
+            exit 1
+          fi
+          # Must be a published release, not just a tag.
+          gh release view "$tag" --repo "$RELEASE_REPO" --json tagName -q .tagName > /dev/null
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: ${{ env.RELEASE_REPO }}
+          ref: refs/tags/${{ steps.tag.outputs.tag }}
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-bun
+
+      - name: Build windows-x64
+        working-directory: packages/opencode
+        shell: bash
+        env:
+          OPENCODE_VERSION: ${{ steps.tag.outputs.version }}
+        run: bun run build --single --skip-install
+
+      - name: Package
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          src=packages/opencode/dist/opencode-windows-x64/bin/opencode.exe
+          test -f "$src"
+          mkdir -p out/stage
+          cp "$src" "out/stage/$BIN"
+          # Same shape as agentum-code-darwin-arm64.zip: one binary at the
+          # root. bsdtar writes the zip, the same tool the desktop app's
+          # download-runtime script reads it with.
+          tar="$(cygpath "$SYSTEMROOT")/System32/tar.exe"
+          (cd out/stage && "$tar" -a -cf "../$ASSET" "$BIN")
+          zip_sha256="$(sha256sum "out/$ASSET" | cut -d' ' -f1)"
+          bin_sha256="$(sha256sum "out/stage/$BIN" | cut -d' ' -f1)"
+          printf '%s  %s\n%s  %s\n' "$zip_sha256" "$ASSET" "$bin_sha256" "$BIN" > out/SHA256SUMS
+          cat out/SHA256SUMS
+          echo "zip_sha256=$zip_sha256" >> "$GITHUB_OUTPUT"
+          echo "bin_sha256=$bin_sha256" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: agentum-code-windows-x64
+          path: |
+            out/${{ env.ASSET }}
+            out/SHA256SUMS
+          if-no-files-found: error
+
+  smoke:
+    needs: build
+    # A clean runner: no checkout, no Bun, nothing from the build on PATH.
+    runs-on: windows-2022
+    timeout-minutes: 15
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      ZIP_SHA256: ${{ needs.build.outputs.zip_sha256 }}
+      BIN_SHA256: ${{ needs.build.outputs.bin_sha256 }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: agentum-code-windows-x64
+          path: artifact
+
+      - name: Check the archive and unpack it like the desktop app does
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar="$(cygpath "$SYSTEMROOT")/System32/tar.exe"
+          test "$(sha256sum "artifact/$ASSET" | cut -d' ' -f1)" = "$ZIP_SHA256"
+          members="$("$tar" -tf "artifact/$ASSET" | tr -d '\r')"
+          echo "members: $members"
+          test "$members" = "$BIN"
+          mkdir -p unpacked
+          "$tar" -xf "artifact/$ASSET" -C unpacked "$BIN"
+          test "$(sha256sum "unpacked/$BIN" | cut -d' ' -f1)" = "$BIN_SHA256"
+
+      - name: --version
+        shell: bash
+        run: |
+          set -euo pipefail
+          got="$(timeout 60 "./unpacked/$BIN" --version | tr -d '\r')"
+          echo "agentum-code --version: $got"
+          test "$got" = "$VERSION"
+
+      - name: Commands that need no network
+        shell: bash
+        env:
+          # Any network attempt goes to a closed port and fails loudly.
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          NO_PROXY: ""
+          OPENCODE_DISABLE_AUTOUPDATE: "1"
+          OPENCODE_DISABLE_MODELS_FETCH: "1"
+        run: |
+          set -euo pipefail
+          # Help goes to stderr (upstream's show() in src/index.ts).
+          timeout 60 "./unpacked/$BIN" --help 2>&1 | tee help.txt
+          grep -q 'agentum-code' help.txt
+          timeout 60 "./unpacked/$BIN" debug paths
+
+      - name: Record
+        shell: bash
+        run: |
+          {
+            echo "### Agentum Code ${VERSION} for windows-x64"
+            echo
+            echo '```'
+            cat artifact/SHA256SUMS
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    needs: [build, smoke]
+    if: >-
+      github.repository == 'jgisin/agentum-code' &&
+      github.event_name == 'workflow_dispatch' && inputs.publish &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.build.outputs.tag }}
+      ZIP_SHA256: ${{ needs.build.outputs.zip_sha256 }}
+      BIN_SHA256: ${{ needs.build.outputs.bin_sha256 }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: agentum-code-windows-x64
+          path: artifact
+
+      - name: Attach to the release (never replaces an existing asset)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(sha256sum "artifact/$ASSET" | cut -d' ' -f1)" = "$ZIP_SHA256"
+          if gh release view "$TAG" --repo "$RELEASE_REPO" --json assets -q '.assets[].name' | grep -Fxq "$ASSET"; then
+            echo "::error::$TAG already has $ASSET. Published assets are pinned by sha256 and are never replaced; cut a new release instead."
+            exit 1
+          fi
+          # No --clobber: an asset that appeared in the meantime makes this fail.
+          gh release upload "$TAG" "artifact/$ASSET" --repo "$RELEASE_REPO"
+          gh release view "$TAG" --repo "$RELEASE_REPO" --json body -q .body > notes.md
+          printf '\nwindows-x64 zip sha256: %s\nwindows-x64 bin sha256: %s\n' "$ZIP_SHA256" "$BIN_SHA256" >> notes.md
+          gh release edit "$TAG" --repo "$RELEASE_REPO" --notes-file notes.md
+          {
+            echo "Published $ASSET to $TAG"
+            echo
+            echo "https://github.com/$RELEASE_REPO/releases/download/$TAG/$ASSET"
+          } >> "$GITHUB_STEP_SUMMARY"
